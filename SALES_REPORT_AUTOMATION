@@ -1,0 +1,628 @@
+import openpyxl as op
+import pandas as pd
+from openpyxl import load_workbook
+from openpyxl import workbook
+from openpyxl.styles.fonts import Font
+from openpyxl.styles import Alignment
+from openpyxl.styles import Border, Side
+from openpyxl.styles import Font, Border, Side, Alignment, PatternFill, Protection
+from datetime import datetime
+from PIL import Image as pi
+from openpyxl.drawing.image import Image
+import time
+from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
+
+server = '#######' 
+database = 'K####' 
+username = '#####' 
+password = '######' 
+connection_string = 'DRIVER={ODBC Driver 17 for SQL Server};SERVER='+server+';DATABASE='+database+';UID='+username+';PWD='+ password
+connection_url = URL.create("mssql+pyodbc", query={"odbc_connect": connection_string})
+engine = create_engine(connection_url, fast_executemany=True)
+print("Connection Established:")
+
+
+from pandas import DataFrame
+
+# Shiptoparty 중 New Shiptoparty가 아닌 경우
+
+shipto =pd.read_sql('''SELECT * FROM [ivy.mm.dim.shiptoparty_pos] where abb='KC' and active='active' and grade != 'New' ''', con = engine )
+cust = shipto['shiptoparty'].tolist()
+cust_name = shipto['abb_cust'].tolist()
+cust[0]
+
+# Shiptoparty 중 New Shiptoparty인 경우
+
+shipto2 = pd.read_sql('''SELECT * FROM [ivy.mm.dim.shiptoparty_pos] where abb='KC' and active='active' and grade = 'New' ''', con = engine)
+new_cust = shipto2['shiptoparty'].tolist()
+new_cust_name = shipto2['abb_cust'].tolist()
+
+from pandas import DataFrame
+shipto2 = pd.read_sql('''SELECT * FROM [ivy.mm.dim.shiptoparty_pos] where shiptoparty = '0011016803' ''', con = engine)
+new_cust =shipto2['shiptoparty'].tolist()
+new_cust_name = shipto2['abb_cust'].tolist()
+
+from pandas import DataFrame
+shipto = pd.read_sql('''SELECT * FROM [ivy.mm.dim.shiptoparty_pos] where shiptoparty = '0011015269' ''', con = engine)
+cust = shipto['shiptoparty'].tolist()
+cust_name = shipto['abb_cust'].tolist()
+
+
+# Active Customer 중 New Account가 아닌 경우 
+
+for x in range(0, len(cust)):
+	df = pd.read_sql("""DECLARE @MDATE DATETIME
+		,@Cust VARCHAR(10)
+	SET @Cust = ?
+	SET @MDATE = (
+			SELECT MAX(ACT_DATE)
+	FROM [ivy.sd.fact.pos]
+	WHERE shiptoparty = @Cust
+			)
+	;
+	WITH
+		ft
+		AS
+		(
+			SELECT T1.shiptoparty
+			, T1.upc
+			, t3.[description]
+			, t3.company
+			, t3.division
+			, t1.act_date
+			, sum(t1.gross_amt) sales
+			, sum(t1.qty) qty
+			FROM [ivy.sd.fact.pos] T1
+				LEFT JOIN [ivy.mm.dim.shiptoparty_pos] T2 ON T1.shiptoparty = T2.shiptoparty
+				LEFT JOIN [ivy.mm.dim.posupc] T3 ON T1.upc = T3.upc
+			WHERE YEAR(@MDATE) - 1 <= YEAR(ACT_DATE)
+				AND MONTH(act_date) <= MONTH(@MDATE)
+				AND T1.shiptoparty = @Cust
+			GROUP BY T1.shiptoparty
+			,T1.upc
+			,t3.[description]
+			,t3.company
+			,t3.division
+			,t1.act_date
+		)
+		,
+		yrsum
+		AS
+		(
+			SELECT FT.UPC
+			, FT.[description]
+			, FT.company
+			, FT.division
+			, YEAR(FT.act_date) YR
+			, SUM(FT.sales) YRSales
+			, SUM(FT.qty) YRQty
+			FROM FT
+			GROUP BY FT.upc
+			,YEAR(FT.act_date)
+			,FT.[description]
+			,FT.company
+			,FT.division
+		)
+		,
+		sum
+		AS
+		(
+			SELECT t1.upc
+			, T1.[description]
+			, T1.company
+			, T3.extmg
+			, t1.YRSales LYSales
+			, t2.YRSales CYSales
+			, CASE 
+				WHEN t1.YRSales IS NULL
+					OR t1.YRSales = 0
+					THEN 0
+				ELSE (t2.YRSales - t1.YRSales) / t1.YRSales
+				END AS YoYGrowthSales
+			, t1.YRQty LYQty
+			, t2.YRQty CYQty
+			, CASE 
+				WHEN t1.YRQty IS NULL
+					OR t1.YRQty = 0
+					THEN 0
+				ELSE (t2.YRQty - t1.YRQty) / t1.YRQty
+				END AS YoYGrowthQty
+			FROM yrsum t1
+				LEFT JOIN yrsum t2 ON t1.yr = t2.yr - 1
+					AND t1.upc = t2.upc
+				LEFT JOIN [ivy.mm.dim.div_pos] t3 ON t1.division = t3.division
+		)
+		,
+		fpvt
+		AS
+		(
+			SELECT *
+			FROM (
+			SELECT upc
+				, act_date
+				, sales
+				FROM FT
+			) t2
+		pivot(sum(sales) FOR act_date IN (
+					[2022-01-01]
+					,[2022-02-01]
+					,[2022-03-01]
+					,[2022-04-01]
+					,[2022-05-01]
+					,[2022-06-01]
+					,[2022-07-01]
+					,[2022-08-01]
+					,[2022-09-01]
+					,[2022-10-01]
+					,[2022-11-01]
+					,[2022-12-01]
+					
+					)) pvt
+		)
+	SELECT t1.*
+		, [2022-01-01]
+		, [2022-02-01]
+		, [2022-03-01]
+		, [2022-04-01]
+		, [2022-05-01]
+		, [2022-06-01]
+		, [2022-07-01]
+		, [2022-08-01]
+		,[2022-09-01]
+					,[2022-10-01]
+					,[2022-11-01]
+					,[2022-12-01]
+	FROM sum t1
+		LEFT JOIN fpvt t2 ON t1.upc = t2.upc
+	ORDER BY t1.CYSales DESC""", con = engine, params = (cust[x],))
+
+	a = df.columns.tolist()
+	from openpyxl.styles import numbers
+	from openpyxl.styles import Font, Border, Side, Alignment, PatternFill, Protection
+	# df count row, column
+	rows= len(df.axes[0])
+	cols = len(df.axes[1])
+	date = datetime.today().strftime("%m%d%Y")
+	wb = op.Workbook()
+	ws = wb.worksheets[0]
+
+	# 상단 리스트 제목 형식 맞추기 
+	ws.sheet_view.showGridLines = False
+	ws.row_dimensions[1].height = 50
+	A = cust_name[x]
+	title = ws.cell(row = 1 , column = 1, value = A)
+	title.font = Font(size = 20, name = 'Arial', color = "002060", bold = True)
+
+	# column A width 맞추기 
+	ws.column_dimensions['A'].width = 25.71
+	ws.column_dimensions['B'].width = 74.57
+	ws.column_dimensions['C'].width = 20.14
+	ws.column_dimensions['D'].width = 15.29
+	ws.column_dimensions['E'].width = 15.29
+	ws.column_dimensions['F'].width = 15.29
+	ws.column_dimensions['G'].width = 19.57
+	ws.column_dimensions['J'].width = 17.86
+	ws.column_dimensions['K'].width = 14
+	ws.column_dimensions['L'].width = 14
+	ws.column_dimensions['M'].width = 14
+	ws.column_dimensions['N'].width = 14
+	ws.column_dimensions['O'].width = 14
+	ws.column_dimensions['P'].width = 14
+	ws.column_dimensions['Q'].width = 14
+	ws.column_dimensions['R'].width = 14
+
+
+	# excel sheet cell styling
+
+	for a in range(0, cols):
+		for z in range(3, rows+3):
+			b = ws.cell(row = z,column = a+1 )
+			b.border = Border(top = Side(border_style =None),bottom = Side(border_style = "thin"), left = Side(border_style = None), right = Side(border_style = None))
+
+	#Subtitle
+	a= df.columns.tolist()
+	for z in range(0, len(a)):
+		b = ws.cell(row = 2, column = z+1)
+		b.value = a[z]
+		b.font = Font(size = 10, name = 'Arial', bold = True, color = "FFFFFF")
+		b.alignment = Alignment(horizontal = 'center', vertical = 'center')
+		b.fill = PatternFill(fgColor = '000033', fill_type = "solid")
+	
+
+	for b in range(0, len(a)):
+		ws.cell(row = 2, column = b+1).value = a[b]
+		
+
+
+	for z in range(0, cols):
+		b = ws.cell(row = 3, column = z+1)
+		b.value = df.iloc[3,z]
+		b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+		b.font = Font(size = 10, name = 'Arial', bold = False, color = "000000")
+
+	# First 'UPC' column
+	for y in range(0, rows):
+		b = ws.cell(row=y+3, column = 1)
+		b.value = df.iloc[y, 0]
+		b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+		b.font = Font(size = 10, name = 'Arial', bold = False, color = "000000")
+		y+=1
+
+	# Second 'Category' column
+	# df.iloc[row, column]
+	for z in range(0,rows):
+		b = ws.cell( row = z+3, column = 2)
+		b.value = df.iloc[z,1]
+		b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+		b.font = Font(size = 10, name = 'Arial', bold = False, color = "000000")
+		z+=1
+
+	# Third 'Vendor' Column
+	for c in range(0,rows):
+		b = ws.cell(row = c+3 , column = 3)
+		b.value = df.iloc[c, 2]
+		b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+		b.font = Font(size=10, name = 'Arial', bold = False, color = "000000")
+		c+=1
+
+	# Fourth 'Description' Column 
+	for d in range(0, rows):
+		b = ws.cell(row = d+3, column = 4)
+		b.value = df.iloc[d,3]
+		b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+		b.font = Font(size=  10, name = 'Arial', bold = False, color = "000000")
+		d+=1
+
+	# Fifth, Sixth, Seventh column $$ (AVGPrice, L2MSales, LMSales)
+	for d in range(5, 8):
+		for z in range(0,rows):
+			b = ws.cell(row = z+3, column = d)
+			b.value = df.iloc[z, d-1]
+			b.alignment = Alignment(horizontal ='center',vertical = 'center')
+			b.font = Font(size = 10,name = 'Arial',bold = False, color = "000000")
+			b.number_format = u'$#,##0.00;'
+			z+=1
+
+
+	# Eigth column , twelveth column  Qty
+	for a in [8,9,12]:
+		for z in range(0, rows):
+			b = ws.cell(row = z+3, column = a)
+			b.value = df.iloc[z,a-1]
+			b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+			b.font = Font(size = 10, name = 'Arial', bold = False, color = "000000")
+			z+=1
+
+	# Ninth, thirteenth column (%)
+	for a in [7,10]:
+		for z in range(0,rows):
+			b = ws.cell(row=z+3,column = a)
+			b.value = df.iloc[z,a-1]
+			val = b.value
+			if val <0:
+				b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+				b.font = Font(size = 10, name = 'Arial',bold = True, color = "FF0000")
+				b.number_format = '0.00%'
+			elif val>0:
+				b.alignment = Alignment(horizontal= 'center',vertical = 'center')
+				b.font = Font(size = 10, name = 'Arial', bold = True, color ='22bc22')
+				b.number_format = '0.00%'
+			else:
+				b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+				b.font = Font(size = 10, name = 'Arial', bold = True, color ='000000')
+				b.number_format = '0.00%'
+			z+=1
+
+
+	# tenth, eleventh column (2021 Sales, 2022 Sales)
+	for a in range(11,cols+1):
+		for z in range(0,rows):
+			b = ws.cell(row=z+3, column =a)
+			b.value = df.iloc[z, a-1]
+			b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+			b.font = Font(size = 10, name = 'Arial',bold = False, color=  "000000")
+			b.number_format = u'$#,##0.00;'
+			z+=1
+
+	# Rest of the Sales data
+	for a in range(14, cols+1):
+		for z in range(0, rows):
+			b = ws.cell(row = z+3, column = a)
+			b.value = df.iloc[z,a-1]
+			b.alignment = Alignment(horizontal = 'center', vertical = 'center')
+			b.font = Font(size=10, name = 'Arial',bold = False, color = "000000")
+			b.number_format = u'$#,##0.00;'
+			z+=1
+
+	#save the file
+	wb.save("C:\\Users\\KISS Admin\OneDrive - Kiss Products Inc\\Desktop\\POS_Project\\Sales_Report2\\" + str(A) + ".xlsx")
+	print(str(A) + "is done")
+
+for x in range(0, len(new_cust)):
+	df = pd.read_sql("""DECLARE @MDATE DATETIME
+		,@Cust VARCHAR(10)
+	SET @Cust = ?
+	SET @MDATE = (
+			SELECT MAX(ACT_DATE)
+	FROM [ivy.sd.fact.pos]
+	WHERE shiptoparty = @Cust
+			)
+	;
+	WITH
+		ft
+		AS
+		(
+			SELECT T1.shiptoparty
+			, T1.upc
+			, t3.[description]
+			, t3.company
+			, t3.division
+			, t1.act_date
+			, sum(t1.gross_amt) sales
+			, sum(t1.qty) qty
+			FROM [ivy.sd.fact.pos] T1
+				LEFT JOIN [ivy.mm.dim.shiptoparty_pos] T2 ON T1.shiptoparty = T2.shiptoparty
+				LEFT JOIN [ivy.mm.dim.posupc] T3 ON T1.upc = T3.upc
+			WHERE YEAR(@MDATE) - 1 <= YEAR(ACT_DATE)
+				AND MONTH(act_date) <= MONTH(@MDATE)
+				AND T1.shiptoparty = @Cust
+			GROUP BY T1.shiptoparty
+			,T1.upc
+			,t3.[description]
+			,t3.company
+			,t3.division
+			,t1.act_date
+		)
+		,
+		yrsum
+		AS
+		(
+			SELECT FT.UPC
+			, FT.[description]
+			, FT.company
+			, FT.division
+			, YEAR(FT.act_date) YR
+			, SUM(FT.sales) YRSales
+			, SUM(FT.qty) YRQty
+			FROM FT
+			GROUP BY FT.upc
+			,YEAR(FT.act_date)
+			,FT.[description]
+			,FT.company
+			,FT.division
+		)
+		,
+		sum
+		AS
+		(
+			SELECT t1.upc
+			, T1.[description]
+			, T1.company
+			, T3.extmg
+			, t1.YRSales LYSales
+			, t2.YRSales CYSales
+			, CASE 
+				WHEN t1.YRSales IS NULL
+					OR t1.YRSales = 0
+					THEN 0
+				ELSE (t2.YRSales - t1.YRSales) / t1.YRSales
+				END AS YoYGrowthSales
+			, t1.YRQty LYQty
+			, t2.YRQty CYQty
+			, CASE 
+				WHEN t1.YRQty IS NULL
+					OR t1.YRQty = 0
+					THEN 0
+				ELSE (t2.YRQty - t1.YRQty) / t1.YRQty
+				END AS YoYGrowthQty
+			FROM yrsum t1
+				LEFT JOIN yrsum t2 ON t1.yr = t2.yr - 1
+					AND t1.upc = t2.upc
+				LEFT JOIN [ivy.mm.dim.div_pos] t3 ON t1.division = t3.division
+		)
+		,
+		fpvt
+		AS
+		(
+			SELECT *
+			FROM (
+			SELECT upc
+				, act_date
+				, sales
+				FROM FT
+			) t2
+		pivot(sum(sales) FOR act_date IN (
+					[2022-01-01]
+					,[2022-02-01]
+					,[2022-03-01]
+					,[2022-04-01]
+					,[2022-05-01]
+					,[2022-06-01]
+					,[2022-07-01]
+					,[2022-08-01]
+     ,[2022-09-01]
+					,[2022-10-01]
+					,[2022-11-01]
+					,[2022-12-01]
+					)) pvt
+		)
+	SELECT t1.*
+		, [2022-01-01]
+		, [2022-02-01]
+		, [2022-03-01]
+		, [2022-04-01]
+		, [2022-05-01]
+		, [2022-06-01]
+		, [2022-07-01]
+		, [2022-08-01]
+  ,[2022-09-01]
+					,[2022-10-01]
+					,[2022-11-01]
+					,[2022-12-01]
+	FROM sum t1
+		LEFT JOIN fpvt t2 ON t1.upc = t2.upc
+	ORDER BY t1.CYSales DESC""", con = engine, params = (new_cust[x],))
+
+	a = df.columns.tolist()
+	from openpyxl.styles import numbers
+	from openpyxl.styles import Font, Border, Side, Alignment, PatternFill, Protection
+	# df count row, column
+	rows= len(df.axes[0])
+	cols = len(df.axes[1])
+	date = datetime.today().strftime("%m%d%Y")
+	wb = op.Workbook()
+	ws = wb.worksheets[0]
+
+	# 상단 리스트 제목 형식 맞추기 
+	ws.sheet_view.showGridLines = False
+	ws.row_dimensions[1].height = 50
+	A = new_cust_name[x]
+	title = ws.cell(row = 1 , column = 1, value = A)
+	title.font = Font(size = 20, name = 'Arial', color = "002060", bold = True)
+
+	# column A width 맞추기 
+	ws.column_dimensions['A'].width = 25.71
+	ws.column_dimensions['B'].width = 74.57
+	ws.column_dimensions['C'].width = 20.14
+	ws.column_dimensions['D'].width = 15.29
+	ws.column_dimensions['E'].width = 15.29
+	ws.column_dimensions['F'].width = 15.29
+	ws.column_dimensions['G'].width = 19.57
+	ws.column_dimensions['J'].width = 17.86
+	ws.column_dimensions['K'].width = 14
+	ws.column_dimensions['L'].width = 14
+	ws.column_dimensions['M'].width = 14
+	ws.column_dimensions['N'].width = 14
+	ws.column_dimensions['O'].width = 14
+	ws.column_dimensions['P'].width = 14
+	ws.column_dimensions['Q'].width = 14
+	ws.column_dimensions['R'].width = 14
+
+
+	# excel sheet cell styling
+
+	for a in range(0, cols):
+		for z in range(3, rows+3):
+			b = ws.cell(row = z,column = a+1 )
+			b.border = Border(top = Side(border_style =None),bottom = Side(border_style = "thin"), left = Side(border_style = None), right = Side(border_style = None))
+
+	#Subtitle
+	a= df.columns.tolist()
+	for z in range(0, len(a)):
+		b = ws.cell(row = 2, column = z+1)
+		b.value = a[z]
+		b.font = Font(size = 10, name = 'Arial', bold = True, color = "FFFFFF")
+		b.alignment = Alignment(horizontal = 'center', vertical = 'center')
+		b.fill = PatternFill(fgColor = '000033', fill_type = "solid")
+	
+
+	for b in range(0, len(a)):
+		ws.cell(row = 2, column = b+1).value = a[b]
+		
+
+
+	for z in range(0, cols):
+		b = ws.cell(row = 3, column = z+1)
+		b.value = df.iloc[3,z]
+		b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+		b.font = Font(size = 10, name = 'Arial', bold = False, color = "000000")
+
+	# First 'UPC' column
+	for y in range(0, rows):
+		b = ws.cell(row=y+3, column = 1)
+		b.value = df.iloc[y, 0]
+		b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+		b.font = Font(size = 10, name = 'Arial', bold = False, color = "000000")
+		y+=1
+
+	# Second 'Category' column
+	# df.iloc[row, column]
+	for z in range(0,rows):
+		b = ws.cell( row = z+3, column = 2)
+		b.value = df.iloc[z,1]
+		b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+		b.font = Font(size = 10, name = 'Arial', bold = False, color = "000000")
+		z+=1
+
+	# Third 'Vendor' Column
+	for c in range(0,rows):
+		b = ws.cell(row = c+3 , column = 3)
+		b.value = df.iloc[c, 2]
+		b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+		b.font = Font(size=10, name = 'Arial', bold = False, color = "000000")
+		c+=1
+
+	# Fourth 'Description' Column 
+	for d in range(0, rows):
+		b = ws.cell(row = d+3, column = 4)
+		b.value = df.iloc[d,3]
+		b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+		b.font = Font(size=  10, name = 'Arial', bold = False, color = "000000")
+		d+=1
+
+	# Fifth, Sixth, Seventh column $$ (AVGPrice, L2MSales, LMSales)
+	for d in range(5, 8):
+		for z in range(0,rows):
+			b = ws.cell(row = z+3, column = d)
+			b.value = df.iloc[z, d-1]
+			b.alignment = Alignment(horizontal ='center',vertical = 'center')
+			b.font = Font(size = 10,name = 'Arial',bold = False, color = "000000")
+			b.number_format = u'$#,##0.00;'
+			z+=1
+
+
+	# Eigth column , twelveth column  Qty
+	for a in [8,9,12]:
+		for z in range(0, rows):
+			b = ws.cell(row = z+3, column = a)
+			b.value = df.iloc[z,a-1]
+			b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+			b.font = Font(size = 10, name = 'Arial', bold = False, color = "000000")
+			z+=1
+
+	# Ninth, thirteenth column (%)
+	'''for a in [7,10]:
+		for z in range(0,rows):
+			b = ws.cell(row=z+3,column = a)
+			b.value = df.iloc[z,a-1]
+			val = b.value
+			if val <0:
+				b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+				b.font = Font(size = 10, name = 'Arial',bold = True, color = "FF0000")
+				b.number_format = '0.00%'
+			elif val>0:
+				b.alignment = Alignment(horizontal= 'center',vertical = 'center')
+				b.font = Font(size = 10, name = 'Arial', bold = True, color ='22bc22')
+				b.number_format = '0.00%'
+			else:
+				b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+				b.font = Font(size = 10, name = 'Arial', bold = True, color ='000000')
+				b.number_format = '0.00%'
+			z+=1
+'''
+
+	# tenth, eleventh column (2021 Sales, 2022 Sales)
+	for a in range(11,cols+1):
+		for z in range(0,rows):
+			b = ws.cell(row=z+3, column =a)
+			b.value = df.iloc[z, a-1]
+			b.alignment = Alignment(horizontal = 'center',vertical = 'center')
+			b.font = Font(size = 10, name = 'Arial',bold = False, color=  "000000")
+			b.number_format = u'$#,##0.00;'
+			z+=1
+
+	# Rest of the Sales data
+	for a in range(14, cols+1):
+		for z in range(0, rows):
+			b = ws.cell(row = z+3, column = a)
+			b.value = df.iloc[z,a-1]
+			b.alignment = Alignment(horizontal = 'center', vertical = 'center')
+			b.font = Font(size=10, name = 'Arial',bold = False, color = "000000")
+			b.number_format = u'$#,##0.00;'
+			z+=1
+
+	#save the file
+	wb.save("C:\\Users\\KISS Admin\\OneDrive - Kiss Products Inc\\Desktop\\POS_Project\\Sales_Report2\\" + A + ".xlsx")
+	print(A + "is done")
+
