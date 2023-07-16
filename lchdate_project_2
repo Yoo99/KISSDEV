@@ -1,0 +1,30 @@
+with t1 as (
+select a.act_date, a.so_num, a.po_num, a.shiptoparty, a.material, a.gross_amt, a.qty, a.ordsqc, b.state_key
+from [ivy.sd.fact.ord_ppp] a 
+left join [ivy.mm.dim.shiptoparty] b on a.shiptoparty = b.shiptoparty
+where a.shiptoparty not in ('0011008549', '0011002886', '0011011500', '0011011419', '0011011147') and a.po_num not like 'TEST ORDER%' 
+and a.so_num not like '6%' and a.material in (select distinct material from [ivy.mm.dim.lchdate_sample])),
+tt as (
+select material, case when min(adj_date) is not null then min(adj_date)
+else min(sql_som_lchdate) end as [ADJ DATE] from [ivy.mm.dim.lchdate_sample]
+group by material),t2 as (
+select a.act_date, a.material, a.shiptoparty, a.po_num, a.gross_amt, a.qty, a.ordsqc, tt.[ADJ DATE],a.state_key, c.pu, c.division, c.ext_mg, c.sales_grade
+from t1 a 
+left join [ivy.mm.dim.lchdate_sample] b on a.material  = b.material 
+left join [ivy.mm.dim.mtrl] c on a.material = c.material
+left join tt on a.material = tt.material
+group by a.act_date, a.so_num, a.po_num, a.shiptoparty, a.material, a.gross_amt, a.qty, a.state_key, tt.[ADJ DATE], c.pu, c.division, c.ext_mg, c.sales_grade,a.ordsqc),
+t3 as( SELECT convert(VARCHAR(10), a.act_date, 111) AS oddate, a.material, a.pu, a.division, a.ext_mg, a.sales_grade, a.[ADJ DATE],count(distinct a.po_num) AS NumberofOrders, a.shiptoparty,
+sum(a.qty) as [ORDER QTY], a.ordsqc from t2 a group by a.act_date, a.material, a.pu, a.division, a.ext_mg, a.sales_grade, a.[ADJ DATE], a.shiptoparty, a.ordsqc),
+t4 as (
+select a.oddate, a.material, a.pu, a.division, a.ext_mg, a.sales_grade,a.[ADJ DATE], a.[NumberofOrders], a.shiptoparty, a.ordsqc,dateadd(dd, -60, a.[ADJ DATE]) bf_60, 
+dateadd(dd, 180, a.[ADJ DATE]) af_180, b.thedate, datediff(day, a.[ADJ DATE], b.thedate) as [DATE DIFFERENCE], b.IsKissHoliday, b.IsWeekend
+from t3 a 
+left join [ivy.mm.dim.date] b on a.oddate = b.TheDate
+where a.oddate = b.thedate and b.TheDate between dateadd(dd, -60, a.[ADJ DATE]) and dateadd(dd, 180, a.[ADJ DATE]) and b.TheDate>='20180101'
+),t5 as(
+select * from t4
+where ordsqc = '1' and material in (select distinct material from [ivy.mm.dim.lchdate_sample]))
+select a.*,b.shiptoparty_dba, b.state_key from t5 a
+left join[ivy.mm.dim.shiptoparty] b on a.shiptoparty = b.shiptoparty 
+where a.material in ('100PS25C','050TN')
